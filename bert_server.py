@@ -8,7 +8,7 @@ from scipy.spatial import procrustes
 
 app = FastAPI()
 
-model = SentenceTransformer("sonoisa/sentence-bert-base-ja-mean-tokens")
+model = SentenceTransformer("sonoisa/sentence-bert-base-ja-mean-tokens-v2")
 
 class WordRequest(BaseModel):
     words: List[str]
