@@ -4,39 +4,42 @@ from typing import List
 from sentence_transformers import SentenceTransformer, util
 from sklearn.manifold import MDS
 import numpy as np
+from scipy.spatial import procrustes
 
 app = FastAPI()
 
-# 日本語BERTモデルの読み込み
 model = SentenceTransformer("sonoisa/sentence-bert-base-ja-mean-tokens-v2")
 
-# リクエストの形式定義
 class WordRequest(BaseModel):
     words: List[str]
 
+# 初期のアンカー位置（原点）に合わせるための基準行列
+anchor_template = np.array([[0.0, 0.0]])
+
 @app.post("/position")
 async def compute_positions(req: WordRequest):
-    # 空文字やNoneを除外
     words = [w for w in req.words if w is not None and w.strip() != ""]
     if len(words) < 2:
-        return {"positions": []}  # アンカー＋1語以上が必要
+        return {"positions": []}  # アンカー＋最低1語必要
 
-    # 文ベクトル化
+    # BERT埋め込み
     embeddings = model.encode(words)
 
-    # 類似度行列から距離行列へ
+    # 類似度行列から距離行列
     similarity_matrix = util.cos_sim(embeddings, embeddings).numpy()
     distance_matrix = 1.0 - similarity_matrix
 
-    # MDSで2次元座標に変換
+    # MDSによる2次元プロット
     mds = MDS(n_components=2, dissimilarity="precomputed", random_state=42)
     mds_positions = mds.fit_transform(distance_matrix)
 
-    # アンカー語を原点に平行移動
-    anchor_pos = mds_positions[0]
-    aligned_positions = mds_positions - anchor_pos
+    # プロクラステス変換：アンカー語を原点(0,0)に配置
+    anchor_index = 0
+    template = np.copy(mds_positions)  # コピーしておく（回転前の位置）
+    template[anchor_index] = [0.0, 0.0]  # 原点にするテンプレート
 
-    # 結果の整形と返却
+    _, aligned_positions, _ = procrustes(template, mds_positions)
+
     result = [
         {"word": word, "x": float(pos[0]), "y": float(pos[1])}
         for word, pos in zip(words, aligned_positions)
