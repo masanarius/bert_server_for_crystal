@@ -1,53 +1,47 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List
 from sentence_transformers import SentenceTransformer, util
 from sklearn.manifold import MDS
 import numpy as np
+from scipy.spatial import procrustes
 
 app = FastAPI()
 
-# 日本語BERTモデル
 model = SentenceTransformer("sonoisa/sentence-bert-base-ja-mean-tokens")
 
-# 前回の語を保存
-previous_words: List[str] = []
-
-# リクエストの形式
 class WordRequest(BaseModel):
     words: List[str]
 
+# 初期のアンカー位置（原点）に合わせるための基準行列
+anchor_template = np.array([[0.0, 0.0]])
+
 @app.post("/position")
 async def compute_positions(req: WordRequest):
-    global previous_words
-
-    # 空やnullな語を除外
-    current_words = [w for w in req.words if w is not None and w.strip() != ""]
-    previous_valid = [w for w in previous_words if w is not None and w.strip() != ""]
-
-    all_words = previous_valid + current_words
-    if len(current_words) == 0:
-        return {"positions": []}  # 返す語がない場合
+    words = [w for w in req.words if w is not None and w.strip() != ""]
+    if len(words) < 2:
+        return {"positions": []}  # アンカー＋最低1語必要
 
     # BERT埋め込み
-    embeddings = model.encode(all_words)
+    embeddings = model.encode(words)
 
-    # 類似度 → 距離行列
+    # 類似度行列から距離行列
     similarity_matrix = util.cos_sim(embeddings, embeddings).numpy()
     distance_matrix = 1.0 - similarity_matrix
 
-    # MDS
-    mds = MDS(n_components=2, dissimilarity='precomputed', random_state=42)
-    positions = mds.fit_transform(distance_matrix)
+    # MDSによる2次元プロット
+    mds = MDS(n_components=2, dissimilarity="precomputed", random_state=42)
+    mds_positions = mds.fit_transform(distance_matrix)
 
-    # 今回の語のインデックス部分のみ返す
-    current_positions = positions[-len(current_words):]
+    # プロクラステス変換：アンカー語を原点(0,0)に配置
+    anchor_index = 0
+    template = np.copy(mds_positions)  # コピーしておく（回転前の位置）
+    template[anchor_index] = [0.0, 0.0]  # 原点にするテンプレート
 
-    # 有効な語のみ保存
-    previous_words = current_words
+    _, aligned_positions, _ = procrustes(template, mds_positions)
 
     result = [
         {"word": word, "x": float(pos[0]), "y": float(pos[1])}
-        for word, pos in zip(current_words, current_positions)
+        for word, pos in zip(words, aligned_positions)
     ]
     return {"positions": result}
