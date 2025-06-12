@@ -8,4 +8,4 @@ scipy
 protobuf>=3.20.0  
 fugashi
 ipadic
-unification-lite
+unidic-lite
