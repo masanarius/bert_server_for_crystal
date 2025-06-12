@@ -6,3 +6,5 @@ numpy==1.26.4
 torch>=1.13.0
 scipy
 protobuf>=3.20.0  
+fugashi
+ipadic
